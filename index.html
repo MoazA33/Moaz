@@ -79,7 +79,20 @@ function getChatId(a, b) { return [a,b].sort().join('__'); }
 function esc(t) { const d=document.createElement('div'); d.appendChild(document.createTextNode(t)); return d.innerHTML; }
 function ts(time) { return time ? new Date(time).toLocaleTimeString('ar',{hour:'2-digit',minute:'2-digit'}) : ''; }
 
-// ── LOGIN ──
+// ── إظهار/إخفاء الباسورد ──
+window.togglePass = function() {
+  const inp = document.getElementById('passInput');
+  const icon = document.getElementById('eyeIcon');
+  if(inp.type === 'password') { inp.type = 'text'; icon.textContent = '🙈'; }
+  else { inp.type = 'password'; icon.textContent = '👁️'; }
+}
+
+// ADMIN — اسمك هو الأدمن
+const ADMIN_NAME = 'Moaz'; // ← غيّر ده لاسمك
+
+function isAdmin() { return myName === ADMIN_NAME; }
+
+
 window.login = function() {
   const n = document.getElementById('nameInput').value.trim();
   const p = document.getElementById('passInput').value.trim();
@@ -240,13 +253,16 @@ function listenGroups() {
     list.innerHTML = '';
     if(!Object.keys(data).length) { list.innerHTML = '<div class="empty-list" style="font-size:12px">اضغط + عشان تعمل جروب</div>'; return; }
     Object.entries(data).forEach(([id, g]) => {
+      // اظهر الجروب بس لو انا عضو فيه أو أنا الأدمن
+      const members = g.members || {};
+      if(!members[myName] && !isAdmin()) return;
       const d = document.createElement('div');
       d.className = 'list-item' + (currentRoom === id ? ' active' : '');
       d.onclick = () => openGroup(id, g.name);
       d.innerHTML = `
         <div class="item-avatar grp-av">#</div>
-        <div class="item-info"><div class="item-name">${esc(g.name)}</div><div class="item-sub">جروب</div></div>
-        <div class="del-btn" onclick="event.stopPropagation();deleteGroup('${id}')">🗑️</div>`;
+        <div class="item-info"><div class="item-name">${esc(g.name)}</div><div class="item-sub">${Object.keys(members).length} عضو</div></div>
+        ${isAdmin()?`<div class="del-btn" onclick="event.stopPropagation();deleteGroup('${id}')">🗑️</div>`:''}`;
       list.appendChild(d);
     });
   });
@@ -254,6 +270,15 @@ function listenGroups() {
 
 window.showCreateGroup = function() {
   document.getElementById('createGroupModal').style.display = 'flex';
+  // اعبي قايمة الأعضاء المتاحين
+  const membersList = document.getElementById('memberPickerList');
+  membersList.innerHTML = '';
+  Object.values(allUsers).filter(u=>u.name!==myName).forEach(u => {
+    const d = document.createElement('label');
+    d.className = 'member-pick-item';
+    d.innerHTML = `<input type="checkbox" value="${esc(u.name)}"><div class="av sm" style="background:${u.color||'#5865f2'}">${u.name[0].toUpperCase()}</div><span>${esc(u.name)}</span>`;
+    membersList.appendChild(d);
+  });
   setTimeout(()=>document.getElementById('groupNameInput').focus(),100);
 }
 window.closeModal = function() {
@@ -263,10 +288,15 @@ window.closeModal = function() {
 window.createGroup = function() {
   const name = document.getElementById('groupNameInput').value.trim();
   if(!name) return;
-  push(ref(db,'groups'), { name, createdBy: myName, createdAt: Date.now() });
+  // اجمع الأعضاء المختارين
+  const checked = document.querySelectorAll('#memberPickerList input:checked');
+  const members = { [myName]: true };
+  checked.forEach(c => members[c.value] = true);
+  push(ref(db,'groups'), { name, createdBy: myName, createdAt: Date.now(), members });
   closeModal();
 }
 window.deleteGroup = function(id) {
+  if(!isAdmin()) return;
   if(confirm('تمسح الجروب ده؟')) {
     remove(ref(db,`groups/${id}`));
     remove(ref(db,`chats/${id}`));
@@ -274,14 +304,127 @@ window.deleteGroup = function(id) {
   }
 }
 
-window.openDM = function(u) {
-  const id = getChatId(myName, u.name);
-  currentRoom = id; currentRoomType = 'dm';
-  openChat(id, u.name, u.color, false);
-}
+// ── فتح الجروب مع التحقق من العضوية والباند ──
 window.openGroup = function(id, name) {
-  currentRoom = id; currentRoomType = 'group';
-  openChat(id, name, '#5865f2', true);
+  // تحقق من الباند
+  get(ref(db,`groups/${id}/banned/${myName}`)).then(snap => {
+    if(snap.exists()) {
+      const ban = snap.val();
+      if(ban.permanent) { toast('🚫 إنت محظور من هذا الجروب!', 'red'); return; }
+      if(ban.until && Date.now() < ban.until) {
+        const mins = Math.ceil((ban.until - Date.now())/60000);
+        toast(`⏳ إنت ممنوع من الكلام لـ ${mins} دقيقة`, 'red'); return;
+      }
+    }
+    currentRoom = id; currentRoomType = 'group';
+    openChat(id, name, '#5865f2', true);
+  });
+}
+
+// ── إدارة الجروب (أدمن فقط) ──
+window.showGroupAdmin = function(groupId) {
+  if(!isAdmin()) return;
+  get(ref(db,`groups/${groupId}`)).then(snap => {
+    if(!snap.exists()) return;
+    const g = snap.val();
+    const members = g.members || {};
+    document.getElementById('adminGroupId').value = groupId;
+    const list = document.getElementById('adminMemberList');
+    list.innerHTML = '';
+    // الأعضاء الحاليين
+    Object.keys(members).filter(n=>n!==myName).forEach(name => {
+      const banned = g.banned && g.banned[name];
+      const d = document.createElement('div');
+      d.className = 'admin-member-row';
+      d.innerHTML = `
+        <span class="admin-mname">${esc(name)}</span>
+        <div class="admin-actions">
+          <button onclick="kickMember('${groupId}','${name}')" title="طرد">🚪</button>
+          <button onclick="showTimeoutModal('${groupId}','${name}')" title="تايم أوت">⏳</button>
+          <button onclick="banMember('${groupId}','${name}')" class="${banned?'unbanned':''}" title="${banned?'رفع الحظر':'باند دايم'}">🚫</button>
+        </div>`;
+      list.appendChild(d);
+    });
+    // إضافة أعضاء جدد
+    const addList = document.getElementById('adminAddList');
+    addList.innerHTML = '';
+    Object.values(allUsers).filter(u=>!members[u.name]&&u.name!==myName).forEach(u => {
+      const d = document.createElement('label');
+      d.className = 'member-pick-item';
+      d.innerHTML = `<input type="checkbox" value="${esc(u.name)}"><div class="av sm" style="background:${u.color||'#5865f2'}">${u.name[0].toUpperCase()}</div><span>${esc(u.name)}</span>`;
+      addList.appendChild(d);
+    });
+    document.getElementById('groupAdminModal').style.display = 'flex';
+  });
+}
+
+window.closeAdminModal = function() { document.getElementById('groupAdminModal').style.display = 'none'; }
+
+window.addMembersToGroup = function() {
+  const gid = document.getElementById('adminGroupId').value;
+  const checked = document.querySelectorAll('#adminAddList input:checked');
+  checked.forEach(c => set(ref(db,`groups/${gid}/members/${c.value}`), true));
+  toast('✅ تم إضافة الأعضاء!');
+  closeAdminModal();
+}
+
+window.kickMember = function(gid, name) {
+  if(!confirm(`تطرد ${name} من الجروب؟`)) return;
+  remove(ref(db,`groups/${gid}/members/${name}`));
+  toast(`🚪 تم طرد ${name}`);
+  closeAdminModal();
+}
+
+window.banMember = function(gid, name) {
+  get(ref(db,`groups/${gid}/banned/${name}`)).then(snap => {
+    if(snap.exists()) {
+      remove(ref(db,`groups/${gid}/banned/${name}`));
+      toast(`✅ تم رفع الحظر عن ${name}`);
+    } else {
+      if(!confirm(`باند دايم لـ ${name}؟`)) return;
+      set(ref(db,`groups/${gid}/banned/${name}`), { permanent: true, by: myName, at: Date.now() });
+      remove(ref(db,`groups/${gid}/members/${name}`));
+      toast(`🚫 تم باند ${name}`);
+    }
+    closeAdminModal();
+  });
+}
+
+let _timeoutGid='', _timeoutUser='';
+window.showTimeoutModal = function(gid, name) {
+  _timeoutGid=gid; _timeoutUser=name;
+  document.getElementById('timeoutName').textContent = name;
+  document.getElementById('timeoutModal').style.display = 'flex';
+  closeAdminModal();
+}
+window.closeTimeoutModal = function() { document.getElementById('timeoutModal').style.display='none'; }
+window.applyTimeout = function() {
+  const mins = parseInt(document.getElementById('timeoutMins').value);
+  if(!mins || mins < 1) return;
+  const until = Date.now() + mins * 60000;
+  set(ref(db,`groups/${_timeoutGid}/banned/${_timeoutUser}`), { until, by: myName, at: Date.now() });
+  toast(`⏳ ${_timeoutUser} ممنوع من الكلام ${mins} دقيقة`);
+  closeTimeoutModal();
+}
+
+// تحقق من الباند قبل إرسال رسالة في جروب
+const _origSendMessage = window.sendMessage;
+window.sendMessage = function() {
+  if(currentRoomType === 'group') {
+    get(ref(db,`groups/${currentRoom}/banned/${myName}`)).then(snap => {
+      if(snap.exists()) {
+        const ban = snap.val();
+        if(ban.permanent) { toast('🚫 إنت محظور من الكلام هنا!', 'red'); return; }
+        if(ban.until && Date.now() < ban.until) {
+          const mins = Math.ceil((ban.until - Date.now())/60000);
+          toast(`⏳ ممنوع من الكلام لـ ${mins} دقيقة تانية`, 'red'); return;
+        }
+      }
+      _origSendMessage();
+    });
+  } else {
+    _origSendMessage();
+  }
 }
 
 window.goBack = function() {
@@ -306,6 +449,8 @@ function openChat(id, name, color, isGroup) {
   document.getElementById('callBtn').style.display = 'flex';
   document.getElementById('callBtn').textContent = '📞 مكالمة';
   document.getElementById('callBtn').style.background = '#23a559';
+  // اظهر زرار الإدارة للأدمن في الجروب بس
+  document.getElementById('adminBtn').style.display = (isGroup && isAdmin()) ? 'flex' : 'none';
   endCall();
   listenMessages(id, isGroup);
   listenTyping(id);
@@ -611,6 +756,15 @@ body{font-family:'Cairo',sans-serif;background:var(--bg1);color:var(--text);heig
 .search-results{position:absolute;top:calc(100% + 4px);right:12px;left:12px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,0.5);z-index:200;max-height:240px;overflow-y:auto;display:none;}
 .recent-item .item-info{min-width:0;flex:1;}
 #createGroupModal{position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;align-items:center;justify-content:center;z-index:500;backdrop-filter:blur(4px);}
+/* ADMIN */
+.admin-member-row{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg3);border-radius:8px;margin-bottom:6px;}
+.admin-mname{font-size:14px;font-weight:700;color:var(--white);}
+.admin-actions{display:flex;gap:6px;}
+.admin-actions button{background:var(--bg4);border:none;border-radius:6px;padding:5px 10px;font-size:15px;cursor:pointer;transition:background .15s;}.admin-actions button:hover{background:var(--bg5);}
+.member-pick-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;transition:background .1s;}
+.member-pick-item:hover{background:var(--bg4);}
+.member-pick-item input{accent-color:var(--accent);}
+.member-pick-item span{font-size:14px;font-weight:600;color:var(--text);}
 .modal-box{background:var(--bg2);border:1px solid var(--border);border-radius:18px;padding:32px;width:360px;text-align:center;}
 .modal-box h2{font-size:20px;font-weight:900;color:#fff;margin-bottom:8px;}
 .modal-box p{color:var(--muted);font-size:13px;margin-bottom:20px;}
@@ -645,7 +799,10 @@ body{font-family:'Cairo',sans-serif;background:var(--bg1);color:var(--text);heig
     <h1>أهلاً بيك!</h1>
     <p id="loginSubtitle">سجّل دخول أو إنشئ حساب جديد</p>
     <input type="text" id="nameInput" placeholder="اسمك..." maxlength="20" onkeydown="if(event.key==='Enter')document.getElementById('passInput').focus()">
-    <input type="password" id="passInput" placeholder="الباسورد..." maxlength="30" onkeydown="if(event.key==='Enter')login()" style="margin-top:0">
+    <div style="position:relative;width:100%;margin-bottom:14px;">
+      <input type="password" id="passInput" placeholder="الباسورد..." maxlength="30" onkeydown="if(event.key==='Enter')login()" style="width:100%;padding-left:44px;">
+      <span onclick="togglePass()" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:18px;user-select:none;" id="eyeIcon">👁️</span>
+    </div>
     <div id="loginError" style="color:#ed4245;font-size:13px;margin-bottom:10px;display:none;"></div>
     <button class="login-btn" onclick="login()">دخول 🚀</button>
   </div>
@@ -705,6 +862,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg1);color:var(--text);heig
           <div id="callStatus"></div>
         </div>
         <button id="callBtn" onclick="startCall()">📞 مكالمة</button>
+        <button id="adminBtn" onclick="showGroupAdmin(currentRoom)" style="display:none;background:#f0b132;color:#000;border:none;border-radius:8px;padding:7px 12px;font-size:13px;font-weight:700;font-family:'Cairo',sans-serif;cursor:pointer;">👑 إدارة</button>
       </div>
       <div id="messagesContainer"></div>
       <div id="typBar"></div>
@@ -721,14 +879,44 @@ body{font-family:'Cairo',sans-serif;background:var(--bg1);color:var(--text);heig
 
 <!-- CREATE GROUP MODAL -->
 <div id="createGroupModal">
-  <div class="modal-box">
+  <div class="modal-box" style="width:420px">
     <h2>🎉 جروب جديد</h2>
-    <p>حط اسم للجروب وكل الناس هتلاقيه</p>
-    <input type="text" id="groupNameInput" placeholder="اسم الجروب..." maxlength="30"
-      onkeydown="if(event.key==='Enter')createGroup()">
+    <p>حط اسم واختار الأعضاء</p>
+    <input type="text" id="groupNameInput" placeholder="اسم الجروب..." maxlength="30" onkeydown="if(event.key==='Enter')createGroup()">
+    <div style="text-align:right;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:700;">اختار الأعضاء:</div>
+    <div id="memberPickerList" style="max-height:180px;overflow-y:auto;background:var(--bg3);border-radius:10px;padding:6px;margin-bottom:14px;"></div>
     <div class="modal-btns">
       <button class="modal-create" onclick="createGroup()">إنشاء ✅</button>
       <button class="modal-cancel" onclick="closeModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- GROUP ADMIN MODAL -->
+<div id="groupAdminModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;align-items:center;justify-content:center;z-index:500;backdrop-filter:blur(4px);">
+  <div class="modal-box" style="width:440px;max-height:90vh;overflow-y:auto;">
+    <h2>👑 إدارة الجروب</h2>
+    <input type="hidden" id="adminGroupId">
+    <div style="text-align:right;font-size:13px;color:var(--muted);margin-bottom:8px;font-weight:700;">الأعضاء الحاليين:</div>
+    <div id="adminMemberList" style="margin-bottom:18px;"></div>
+    <div style="text-align:right;font-size:13px;color:var(--muted);margin-bottom:8px;font-weight:700;">إضافة أعضاء جدد:</div>
+    <div id="adminAddList" style="max-height:160px;overflow-y:auto;background:var(--bg3);border-radius:10px;padding:6px;margin-bottom:14px;"></div>
+    <div class="modal-btns">
+      <button class="modal-create" onclick="addMembersToGroup()">إضافة ✅</button>
+      <button class="modal-cancel" onclick="closeAdminModal()">إغلاق</button>
+    </div>
+  </div>
+</div>
+
+<!-- TIMEOUT MODAL -->
+<div id="timeoutModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;align-items:center;justify-content:center;z-index:600;backdrop-filter:blur(4px);">
+  <div class="modal-box" style="width:340px;">
+    <h2>⏳ تايم أوت</h2>
+    <p>كام دقيقة تمنع <strong id="timeoutName"></strong> من الكلام؟</p>
+    <input type="number" id="timeoutMins" placeholder="عدد الدقائق..." min="1" max="10080" style="margin-bottom:14px;">
+    <div class="modal-btns">
+      <button class="modal-create" onclick="applyTimeout()" style="background:#f0b132;color:#000;">تطبيق ⏳</button>
+      <button class="modal-cancel" onclick="closeTimeoutModal()">إلغاء</button>
     </div>
   </div>
 </div>
