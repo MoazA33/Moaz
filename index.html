@@ -82,22 +82,49 @@ function ts(time) { return time ? new Date(time).toLocaleTimeString('ar',{hour:'
 // ── LOGIN ──
 window.login = function() {
   const n = document.getElementById('nameInput').value.trim();
-  if(!n) { document.getElementById('nameInput').style.animation='shake .3s'; setTimeout(()=>document.getElementById('nameInput').style.animation='',400); return; }
-  myName = n;
-  myColor = colors[Math.floor(Math.random()*colors.length)];
+  const p = document.getElementById('passInput').value.trim();
+  const errEl = document.getElementById('loginError');
+  errEl.style.display = 'none';
+
+  if(!n || !p) {
+    errEl.textContent = '⚠️ اكتب الاسم والباسورد!';
+    errEl.style.display = 'block'; return;
+  }
+
+  // شوف لو الاسم موجود في Firebase
+  get(ref(db, `users/${n}`)).then(snap => {
+    if(snap.exists()) {
+      // حساب موجود — تحقق من الباسورد
+      const userData = snap.val();
+      if(userData.password !== btoa(p)) {
+        errEl.textContent = '❌ الباسورد غلط!';
+        errEl.style.display = 'block'; return;
+      }
+      // باسورد صح — ادخل
+      myColor = userData.color;
+      enterApp(n, myColor, p);
+    } else {
+      // حساب جديد — سجّل
+      myColor = colors[Math.floor(Math.random()*colors.length)];
+      enterApp(n, myColor, p);
+    }
+  });
+}
+
+function enterApp(name, color, pass) {
+  myName = name; myColor = color;
   const uRef = ref(db, `users/${myName}`);
-  set(uRef, { name:myName, color:myColor, online:true });
+  set(uRef, { name:myName, color:myColor, online:true, password: btoa(pass) });
   onDisconnect(uRef).update({ online:false });
+  // احفظ في المتصفح
+  localStorage.setItem('chatUser', JSON.stringify({name:myName, pass: btoa(pass)}));
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appScreen').style.display = 'flex';
   document.getElementById('myNameDisplay').textContent = myName;
   document.getElementById('myAvatar').textContent = myName[0].toUpperCase();
   document.getElementById('myAvatar').style.background = myColor;
   document.getElementById('shareLink').textContent = window.location.href;
-  listenUsers();
-  listenGroups();
-  listenRecentChats();
-  listenIncomingCall();
+  listenUsers(); listenGroups(); listenRecentChats(); listenIncomingCall();
 }
 
 // ── كل المستخدمين (للبحث) ──
@@ -459,20 +486,18 @@ window.copyLink = function() {
 }
 window.onload = () => {
   document.getElementById('shareLink').textContent = window.location.href;
-  // لو في اسم محفوظ، ادخل تلقائي
-  const saved = localStorage.getItem('myName');
+  // لو في حساب محفوظ، ادخل تلقائي
+  const saved = localStorage.getItem('chatUser');
   if(saved) {
-    document.getElementById('nameInput').value = saved;
-    login();
+    try {
+      const data = JSON.parse(saved);
+      if(data.name && data.pass) {
+        document.getElementById('nameInput').value = data.name;
+        document.getElementById('passInput').value = atob(data.pass);
+        login();
+      }
+    } catch(e){}
   }
-}
-
-// احفظ الاسم عند الدخول
-const _origLogin = window.login;
-window.login = function() {
-  const n = document.getElementById('nameInput').value.trim();
-  if(n) localStorage.setItem('myName', n);
-  _origLogin();
 }
 </script>
 
@@ -618,8 +643,10 @@ body{font-family:'Cairo',sans-serif;background:var(--bg1);color:var(--text);heig
   <div class="login-box">
     <div class="login-logo">💬</div>
     <h1>أهلاً بيك!</h1>
-    <p>حط اسمك وابدأ تتكلم مع صحابك</p>
-    <input type="text" id="nameInput" placeholder="اسمك هنا..." maxlength="20" onkeydown="if(event.key==='Enter')login()">
+    <p id="loginSubtitle">سجّل دخول أو إنشئ حساب جديد</p>
+    <input type="text" id="nameInput" placeholder="اسمك..." maxlength="20" onkeydown="if(event.key==='Enter')document.getElementById('passInput').focus()">
+    <input type="password" id="passInput" placeholder="الباسورد..." maxlength="30" onkeydown="if(event.key==='Enter')login()" style="margin-top:0">
+    <div id="loginError" style="color:#ed4245;font-size:13px;margin-bottom:10px;display:none;"></div>
     <button class="login-btn" onclick="login()">دخول 🚀</button>
   </div>
 </div>
