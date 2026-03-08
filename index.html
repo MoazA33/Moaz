@@ -23,7 +23,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-const CURRENT_VERSION = 3; // ← غيّر الرقم ده لما تعمل تحديث جديد
+const CURRENT_VERSION = 4; // ← غيّر الرقم ده لما تعمل تحديث جديد
 
 const colors = ['#5865f2','#eb459e','#23a559','#f0b132','#ed4245','#00b0f4','#ff7043','#ab47bc','#26c6da','#66bb6a'];
 let myName = '', myColor = '', currentRoom = null, currentRoomType = null;
@@ -281,6 +281,7 @@ function openChat(id, name, color, isGroup) {
   document.getElementById('callBtn').style.background = '#23a559';
   endCall();
   listenMessages(id, isGroup);
+  listenTyping(id);
 }
 
 function showPlaceholder() {
@@ -322,6 +323,7 @@ window.sendMessage = function() {
 }
 window.handleKey = function(e) {
   if(e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  else showTyp();
 }
 
 // ══ VOICE CALL (WebRTC Mesh) ══
@@ -431,6 +433,24 @@ window.acceptCall = async function() {
 }
 window.rejectCall = function() { document.getElementById('incomingCall').style.display='none'; }
 
+
+// TYPING
+let typT=null;
+function showTyp(){if(!currentRoom)return;set(ref(db,'typing/'+currentRoom+'/'+myName),true);clearTimeout(typT);typT=setTimeout(()=>set(ref(db,'typing/'+currentRoom+'/'+myName),null),2000);}
+function listenTyping(id){
+  onValue(ref(db,'typing/'+id),s=>{
+    const data=s.val()||{},typers=Object.keys(data).filter(n=>n!==myName),bar=document.getElementById('typBar');
+    if(typers.length){bar.style.display='flex';bar.innerHTML='<div class="tdots"><span></span><span></span><span></span></div><span>'+(typers.length===1?typers[0]+' بيكتب...':typers.join('، ')+' بيكتبوا...')+'</span>';}
+    else bar.style.display='none';
+  });
+}
+// REPLY
+let replyTo=null;
+window.setReply=function(s,t){replyTo={sender:s,text:t};document.getElementById('replyBar').style.display='flex';document.getElementById('replyTxt').textContent=s+': '+t.substring(0,50);document.getElementById('msgInput').focus();}
+window.clearReply=function(){replyTo=null;document.getElementById('replyBar').style.display='none';}
+// TOAST
+function toast(msg,type){const t=document.createElement('div');t.className='toast';t.style.background=type==='red'?'#f23f43':'#23a559';t.textContent=msg;document.getElementById('toasts').appendChild(t);setTimeout(()=>t.classList.add('show'),10);setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),400);},3000);}
+window.toast=toast;
 window.copyLink = function() {
   navigator.clipboard.writeText(window.location.href).then(()=>{
     const btn=document.querySelector('.copy-btn'); btn.textContent='✅ تم النسخ!';
@@ -443,9 +463,9 @@ window.onload = () => { document.getElementById('shareLink').textContent = windo
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
-  --bg1:#0d0f12;--bg2:#161920;--bg3:#1e2128;--bg4:#252930;--bg5:#2d3039;
-  --accent:#5865f2;--green:#23a559;--red:#ed4245;
-  --text:#e3e5e8;--muted:#72767d;--border:rgba(255,255,255,0.07);
+  --bg1:#313338;--bg2:#2b2d31;--bg3:#1e1f22;--bg4:#404249;--bg5:#383a40;
+  --accent:#5865f2;--green:#23a559;--red:#f23f43;
+  --text:#dbdee1;--muted:#80848e;--border:rgba(255,255,255,0.06);
 }
 body{font-family:'Cairo',sans-serif;background:var(--bg1);color:var(--text);height:100vh;overflow:hidden;}
 
@@ -644,6 +664,8 @@ body{font-family:'Cairo',sans-serif;background:var(--bg1);color:var(--text);heig
         <button id="callBtn" onclick="startCall()">📞 مكالمة</button>
       </div>
       <div id="messagesContainer"></div>
+      <div id="typBar"></div>
+      <div id="replyBar"><span>↩️ رد على:</span><span id="replyTxt"></span><span class="rcls" onclick="clearReply()">✕</span></div>
       <div class="input-area">
         <textarea id="msgInput" rows="1" placeholder="اكتب رسالة..."
           onkeydown="handleKey(event)"
@@ -681,5 +703,6 @@ body{font-family:'Cairo',sans-serif;background:var(--bg1);color:var(--text);heig
   </div>
 </div>
 
+<div id="toasts"></div>
 </body>
 </html>
