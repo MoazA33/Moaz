@@ -23,7 +23,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-const CURRENT_VERSION = 2; // ← غيّر الرقم ده لما تعمل تحديث جديد
+const CURRENT_VERSION = 3; // ← غيّر الرقم ده لما تعمل تحديث جديد
 
 const colors = ['#5865f2','#eb459e','#23a559','#f0b132','#ed4245','#00b0f4','#ff7043','#ab47bc','#26c6da','#66bb6a'];
 let myName = '', myColor = '', currentRoom = null, currentRoomType = null;
@@ -96,26 +96,112 @@ window.login = function() {
   document.getElementById('shareLink').textContent = window.location.href;
   listenUsers();
   listenGroups();
+  listenRecentChats();
   listenIncomingCall();
 }
 
-// ── USERS ──
+// ── كل المستخدمين (للبحث) ──
+let allUsers = {};
 function listenUsers() {
   onValue(ref(db,'users'), snap => {
-    const data = snap.val() || {};
-    const list = document.getElementById('usersList');
-    list.innerHTML = '';
-    const others = Object.values(data).filter(u => u.name !== myName);
-    if(!others.length) { list.innerHTML = '<div class="empty-list">لا يوجد أحد أونلاين<br><small>ابعت الرابط لصاحبك!</small></div>'; return; }
-    others.forEach(u => {
-      const d = document.createElement('div');
-      d.className = 'list-item' + (currentRoom === getChatId(myName, u.name) ? ' active' : '');
-      d.onclick = () => openDM(u);
-      d.innerHTML = `
-        <div class="item-avatar" style="background:${u.color}">${u.name[0].toUpperCase()}<span class="dot ${u.online?'on':'off'}"></span></div>
-        <div class="item-info"><div class="item-name">${esc(u.name)}</div><div class="item-sub">${u.online?'🟢 أونلاين':'⚫ أوفلاين'}</div></div>`;
-      list.appendChild(d);
+    allUsers = snap.val() || {};
+    renderSearch(document.getElementById('searchInput').value.trim());
+    renderRecentChats();
+  });
+}
+
+// ── بحث ──
+window.onSearchInput = function() {
+  const q = document.getElementById('searchInput').value.trim();
+  renderSearch(q);
+}
+
+function renderSearch(q) {
+  const results = document.getElementById('searchResults');
+  if(!q) { results.style.display='none'; return; }
+  const matches = Object.values(allUsers).filter(u => u.name !== myName && u.name.toLowerCase().includes(q.toLowerCase()));
+  results.style.display = 'block';
+  results.innerHTML = '';
+  if(!matches.length) { results.innerHTML='<div class="empty-list" style="padding:12px">مش لاقيه 🔍</div>'; return; }
+  matches.forEach(u => {
+    const d = document.createElement('div');
+    d.className = 'list-item';
+    d.onclick = () => { document.getElementById('searchInput').value=''; results.style.display='none'; openDM(u); };
+    d.innerHTML = `
+      <div class="item-avatar" style="background:${u.color}">${u.name[0].toUpperCase()}<span class="dot ${u.online?'on':'off'}"></span></div>
+      <div class="item-info"><div class="item-name">${esc(u.name)}</div><div class="item-sub">${u.online?'🟢 أونلاين':'⚫ أوفلاين'}</div></div>`;
+    results.appendChild(d);
+  });
+}
+
+// ── المحادثات الأخيرة ──
+let recentChats = {}; // { chatId: { name, color, lastMsg, lastTime, isGroup } }
+
+function listenRecentChats() {
+  // راقب كل المحادثات اللي أنا فيها
+  onValue(ref(db,'chats'), snap => {
+    const chats = snap.val() || {};
+    recentChats = {};
+    Object.entries(chats).forEach(([id, chat]) => {
+      // محادثة خاصة — لو اسمي موجود في الـ id
+      if(id.includes(myName)) {
+        const msgs = chat.messages ? Object.values(chat.messages) : [];
+        if(!msgs.length) return;
+        msgs.sort((a,b)=>b.time-a.time);
+        const last = msgs[0];
+        const otherName = id.replace(myName,'').replace('__','');
+        const u = allUsers[otherName] || {};
+        recentChats[id] = { id, name: otherName, color: u.color||'#5865f2', lastMsg: last.text, lastTime: last.time, isGroup: false, online: u.online };
+      }
     });
+    renderRecentChats();
+  });
+
+  // راقب الجروبات
+  onValue(ref(db,'groups'), snap => {
+    const groups = snap.val() || {};
+    // مسح الجروبات القديمة من recentChats
+    Object.keys(recentChats).forEach(id => { if(recentChats[id].isGroup) delete recentChats[id]; });
+    Object.entries(groups).forEach(([id, g]) => {
+      // جيب آخر رسالة في الجروب
+      get(ref(db,`chats/${id}/messages`)).then(snap2 => {
+        const msgs = snap2.val() ? Object.values(snap2.val()) : [];
+        msgs.sort((a,b)=>b.time-a.time);
+        const last = msgs[0];
+        recentChats[id] = { id, name: g.name, color:'#5865f2', lastMsg: last ? last.text : 'لا توجد رسايل', lastTime: last ? last.time : g.createdAt, isGroup: true };
+        renderRecentChats();
+      });
+    });
+    renderRecentChats();
+  });
+}
+
+function renderRecentChats() {
+  const list = document.getElementById('recentList');
+  const sorted = Object.values(recentChats).sort((a,b)=>(b.lastTime||0)-(a.lastTime||0));
+  if(!sorted.length) {
+    list.innerHTML = '<div class="empty-list">ابحث عن صاحبك فوق وابدأ المحادثة! 👆</div>';
+    return;
+  }
+  list.innerHTML = '';
+  sorted.forEach(c => {
+    const d = document.createElement('div');
+    d.className = 'list-item recent-item' + (currentRoom === c.id ? ' active' : '');
+    d.onclick = () => {
+      if(c.isGroup) openGroup(c.id, c.name);
+      else openDM({ name:c.name, color:c.color, online:c.online });
+    };
+    const t = c.lastTime ? new Date(c.lastTime).toLocaleTimeString('ar',{hour:'2-digit',minute:'2-digit'}) : '';
+    d.innerHTML = `
+      <div class="item-avatar ${c.isGroup?'grp-av':''}" style="${c.isGroup?'':'background:'+c.color}">${c.isGroup?'#':c.name[0].toUpperCase()}${!c.isGroup?`<span class="dot ${c.online?'on':'off'}"></span>`:''}</div>
+      <div class="item-info">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="item-name">${esc(c.name)}</div>
+          <div style="font-size:11px;color:var(--muted)">${t}</div>
+        </div>
+        <div class="item-sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px">${esc(c.lastMsg||'')}</div>
+      </div>`;
+    list.appendChild(d);
   });
 }
 
@@ -431,7 +517,15 @@ body{font-family:'Cairo',sans-serif;background:var(--bg1);color:var(--text);heig
 .send-btn{width:44px;height:44px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s;}
 .send-btn:hover{background:#4752c4;transform:scale(1.05);}
 
-/* MODAL */
+/* SEARCH */
+.search-box{padding:10px 12px;border-bottom:1px solid var(--border);position:relative;}
+.search-wrap{display:flex;align-items:center;background:var(--bg3);border-radius:10px;padding:0 10px;gap:6px;border:1px solid var(--border);transition:border-color .2s;}
+.search-wrap:focus-within{border-color:var(--accent);}
+.search-icon{font-size:14px;flex-shrink:0;}
+.search-wrap input{flex:1;background:transparent;border:none;outline:none;padding:10px 0;font-size:14px;font-family:'Cairo',sans-serif;color:var(--text);direction:rtl;}
+.search-wrap input::placeholder{color:var(--muted);}
+.search-results{position:absolute;top:calc(100% + 4px);right:12px;left:12px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,0.5);z-index:200;max-height:240px;overflow-y:auto;display:none;}
+.recent-item .item-info{min-width:0;flex:1;}
 #createGroupModal{position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;align-items:center;justify-content:center;z-index:500;backdrop-filter:blur(4px);}
 .modal-box{background:var(--bg2);border:1px solid var(--border);border-radius:18px;padding:32px;width:360px;text-align:center;}
 .modal-box h2{font-size:20px;font-weight:900;color:#fff;margin-bottom:8px;}
@@ -479,17 +573,31 @@ body{font-family:'Cairo',sans-serif;background:var(--bg1);color:var(--text);heig
       <span class="my-name-text" id="myNameDisplay">أنت</span>
       <div class="status-dot"></div>
     </div>
+
+    <!-- بحث -->
+    <div class="search-box">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" placeholder="ابحث عن صاحبك..." oninput="onSearchInput()" autocomplete="off">
+      </div>
+      <div id="searchResults" class="search-results"></div>
+    </div>
+
+    <!-- المحادثات الأخيرة -->
     <div class="section-header">
-      <span class="section-title">الأصدقاء</span>
+      <span class="section-title">المحادثات</span>
     </div>
-    <div class="list-container users" id="usersList">
-      <div class="empty-list">⏳ في انتظار صاحبك...</div>
+    <div class="list-container" id="recentList" style="flex:1">
+      <div class="empty-list">ابحث عن صاحبك فوق 👆</div>
     </div>
+
+    <!-- الجروبات -->
     <div class="section-header">
       <span class="section-title">الجروبات</span>
       <div class="add-btn" title="جروب جديد" onclick="showCreateGroup()">+</div>
     </div>
-    <div class="list-container groups" id="groupsList"></div>
+    <div class="list-container groups" id="groupsList" style="max-height:28vh"></div>
+
     <div class="share-box">
       <div class="share-label">📎 ابعت الرابط لصاحبك</div>
       <div class="share-link" id="shareLink" onclick="copyLink()">...</div>
