@@ -457,7 +457,23 @@ window.copyLink = function() {
     setTimeout(()=>btn.textContent='📋 نسخ الرابط',2000);
   });
 }
-window.onload = () => { document.getElementById('shareLink').textContent = window.location.href; }
+window.onload = () => {
+  document.getElementById('shareLink').textContent = window.location.href;
+  // لو في اسم محفوظ، ادخل تلقائي
+  const saved = localStorage.getItem('myName');
+  if(saved) {
+    document.getElementById('nameInput').value = saved;
+    login();
+  }
+}
+
+// احفظ الاسم عند الدخول
+const _origLogin = window.login;
+window.login = function() {
+  const n = document.getElementById('nameInput').value.trim();
+  if(n) localStorage.setItem('myName', n);
+  _origLogin();
+}
 </script>
 
 <style>
