@@ -434,6 +434,58 @@ body{font-family:'Cairo',sans-serif;background:var(--bg1);color:var(--text);heig
   <img id="imgModalSrc" src="" alt="">
 </div>
 
+
+<!-- SETTINGS MODAL -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="mcard" style="width:400px;text-align:right;max-height:88vh;overflow-y:auto;">
+    <h2 style="text-align:center;">⚙️ الإعدادات</h2>
+
+    <!-- رابط الموقع -->
+    <div style="margin-bottom:16px;">
+      <div class="mpick-label" style="margin-bottom:8px;">🔗 رابط الموقع</div>
+      <div id="settingsLink" style="background:var(--bg3);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--accent);word-break:break-all;margin-bottom:6px;cursor:pointer;" onclick="copySettingsLink()">...</div>
+      <button class="mcreate" onclick="copySettingsLink()" style="width:100%;">📋 نسخ الرابط</button>
+    </div>
+
+    <!-- إعدادات الصوت -->
+    <div style="margin-bottom:16px;border-top:1px solid var(--border);padding-top:14px;">
+      <div class="mpick-label" style="margin-bottom:10px;">🔔 إعدادات الصوت</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <span style="font-size:13px;color:var(--text);width:80px;flex-shrink:0;">نوع الرنين</span>
+        <select id="ringtoneSelect" onchange="onRingtoneChange(this.value)" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:'Cairo',sans-serif;font-size:13px;border-radius:6px;padding:7px 10px;outline:none;cursor:pointer;">
+          <option value="default">افتراضي 🔔</option>
+          <option value="soft">ناعم 🎵</option>
+          <option value="ping">بينج ✨</option>
+          <option value="none">صامت 🔇</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:13px;color:var(--text);width:80px;flex-shrink:0;">مستوى الصوت</span>
+        <input type="range" id="volRange" min="0" max="1" step="0.05" value="0.5"
+          oninput="onVolChange(this.value)"
+          style="flex:1;accent-color:var(--accent);">
+        <span id="volVal" style="font-size:13px;color:var(--muted);width:36px;text-align:center;">50%</span>
+      </div>
+    </div>
+
+    <!-- قايمة الأجهزة — للأدمن فقط -->
+    <div id="devicesSection" style="display:none;border-top:1px solid var(--border);padding-top:14px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div class="mpick-label" style="margin-bottom:0;">📱 الأجهزة المسجّلة</div>
+        <button onclick="loadDevices()" style="background:var(--bg4);border:none;color:var(--muted);font-size:12px;font-family:'Cairo',sans-serif;border-radius:6px;padding:4px 10px;cursor:pointer;">🔄 تحديث</button>
+      </div>
+      <div id="devicesList" style="max-height:200px;overflow-y:auto;background:var(--bg3);border-radius:8px;padding:6px;">
+        <div style="color:var(--muted);font-size:13px;padding:8px;text-align:center;">اضغط تحديث لعرض الأجهزة</div>
+      </div>
+    </div>
+
+    <!-- تسجيل الخروج -->
+    <div style="border-top:1px solid var(--border);padding-top:14px;">
+      <button onclick="doLogout()" style="width:100%;background:var(--red);color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:700;font-family:'Cairo',sans-serif;cursor:pointer;margin-bottom:8px;">🚪 تسجيل الخروج</button>
+      <button class="mcancel" onclick="closeSettings()" style="width:100%;">إغلاق</button>
+    </div>
+  </div>
+</div>
 <div id="toasts"></div>
 
 <script type="module">
@@ -1095,12 +1147,52 @@ window.applyTO=function(){
 window.closeModal=function(id){document.getElementById(id).style.display='none';}
 
 window.showSettings=function(){
-  document.getElementById('settingsLink').textContent=location.href;
-  document.getElementById('settingsModal').style.display='flex';
-  const vol=parseFloat(localStorage.getItem('notifVol')||'0.5');
-  document.getElementById('volRange').value=vol;
-  document.getElementById('volVal').textContent=Math.round(vol*100)+'%';
-  document.getElementById('ringtoneSelect').value=localStorage.getItem('ringtone')||'default';
+  try{
+    document.getElementById('settingsLink').textContent=location.href;
+    document.getElementById('settingsModal').style.display='flex';
+    const vol=parseFloat(localStorage.getItem('notifVol')||'0.5');
+    document.getElementById('volRange').value=vol;
+    document.getElementById('volVal').textContent=Math.round(vol*100)+'%';
+    document.getElementById('ringtoneSelect').value=localStorage.getItem('ringtone')||'default';
+    const devSec=document.getElementById('devicesSection');
+    if(devSec && myName===ADMIN){
+      devSec.style.display='block';
+      loadDevices();
+    }
+  }catch(e){console.error('settings error:',e);}
+}
+
+window.loadDevices=function(){
+  const list=document.getElementById('devicesList');
+  list.innerHTML='<div style="color:var(--muted);font-size:13px;padding:8px;text-align:center;">جاري التحميل...</div>';
+  get(ref(db,'devices')).then(snap=>{
+    const devs=snap.val()||{};
+    list.innerHTML='';
+    if(!Object.keys(devs).length){
+      list.innerHTML='<div style="color:var(--muted);font-size:13px;padding:8px;text-align:center;">مفيش أجهزة مسجّلة</div>';
+      return;
+    }
+    Object.entries(devs).forEach(([fp,dev])=>{
+      const d=document.createElement('div');
+      d.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:6px;margin-bottom:4px;background:var(--bg4);';
+      const date=dev.at?new Date(dev.at).toLocaleDateString('ar',{day:'numeric',month:'short',year:'numeric'}):'';
+      d.innerHTML=`
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--white);">${dev.name||'غير معروف'}</div>
+          <div style="font-size:11px;color:var(--muted);">${date} · ${fp.slice(0,12)}...</div>
+        </div>
+        <button onclick="deleteDevice('${fp}')" style="background:var(--red);color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;font-family:'Cairo',sans-serif;cursor:pointer;">🗑️ حذف</button>`;
+      list.appendChild(d);
+    });
+  });
+}
+
+window.deleteDevice=function(fp){
+  if(!confirm('تحذف الجهاز ده؟ الشخص ده هيقدر يعمل حساب جديد!'))return;
+  remove(ref(db,'devices/'+fp)).then(()=>{
+    toast('✅ تم حذف الجهاز!');
+    loadDevices();
+  });
 }
 window.closeSettings=function(){document.getElementById('settingsModal').style.display='none';}
 window.doLogout=function(){
