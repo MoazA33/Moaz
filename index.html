@@ -627,8 +627,9 @@ window.login=function(){
   if(window._loginMode==='register'){
     get(ref(db,'devices/'+(window._fp||'none'))).then(fpSnap=>{
       if(fpSnap.exists()&&fpSnap.val().name!==n){
-        err.textContent='🚫 الجهاز ده سجّل حساب قبل كده! مش ممكن أكتر من حساب.';
-        err.style.display='block';return;
+        err.style.cssText='display:block;background:rgba(237,66,69,0.12);color:#ed4245;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:10px;';
+        err.textContent='🚫 الجهاز ده عنده حساب بالفعل باسم "'+fpSnap.val().name+'" — مش ممكن تعمل أكتر من حساب من نفس الجهاز!';
+        return;
       }
       get(ref(db,'users/'+n)).then(snap=>{
         if(snap.exists()){err.textContent='❌ الاسم ده موجود بالفعل!';err.style.display='block';return;}
@@ -651,7 +652,12 @@ function enterApp(name,color,pass){
   set(ur,{name:myName,color:myColor,online:true,password:btoa(unescape(encodeURIComponent(pass))),lastSeen:Date.now()});
   onDisconnect(ur).update({online:false,lastSeen:serverTimestamp()});
   localStorage.setItem('chatUser',JSON.stringify({name:myName,pass:btoa(unescape(encodeURIComponent(pass)))}));
-  if(window._fp) set(ref(db,'devices/'+window._fp),{name:myName,at:Date.now()});
+  // سجّل البصمة بس لو مش موجودة (يعني register جديد مش login)
+  if(window._fp){
+    get(ref(db,'devices/'+window._fp)).then(s=>{
+      if(!s.exists()) set(ref(db,'devices/'+window._fp),{name:myName,at:Date.now()});
+    });
+  }
   document.getElementById('loginScreen').style.display='none';
   document.getElementById('appScreen').style.display='flex';
   document.getElementById('myNameEl').textContent=myName;
@@ -1379,7 +1385,7 @@ window.onload=async()=>{
     try{
       const d=JSON.parse(saved);
       if(d.name&&d.pass){
-        document.getElementById('tabReg').style.display='none';
+        
         document.getElementById('nameInput').value=d.name;
         document.getElementById('passInput').value=decodeURIComponent(escape(atob(d.pass)));
         window._loginMode='login';login();
@@ -1391,7 +1397,7 @@ window.onload=async()=>{
     const snap=await get(ref(db,'devices/'+window._fp));
     if(snap.exists()){
       const dev=snap.val();
-      document.getElementById('tabReg').style.display='none';
+      
       document.getElementById('nameInput').value=dev.name||'';
       window._loginMode='login';
       const err=document.getElementById('lerr');
