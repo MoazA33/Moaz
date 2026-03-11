@@ -666,7 +666,22 @@ window.setLang=function(lang){
   document.getElementById('noReqs').textContent=t.noReqs;
 }
 
-function chkVer(){onValue(ref(db,'app/version'),s=>{const v=s.val();if(v&&v>VER)showBanner(v);});}
+function chkVer(){
+  // راقب التغيير في real-time طول ما الموقع مفتوح
+  onValue(ref(db,'app/version'),s=>{
+    const v=s.val();
+    if(v&&v>VER){
+      showBanner(v);
+    }
+  });
+  // كمان راجع كل دقيقتين عشان يتأكد
+  setInterval(()=>{
+    get(ref(db,'app/version')).then(s=>{
+      const v=s.val();
+      if(v&&v>VER)showBanner(v);
+    });
+  },120000);
+}
 function pubVer(){get(ref(db,'app/version')).then(s=>{if((s.val()||0)<VER)set(ref(db,'app/version'),VER);});}
 
 window.togglePass=function(){
