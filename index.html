@@ -247,6 +247,12 @@ body.mobile-mode #mobileNav{display:flex;}
 #imgModal img{max-width:90vw;max-height:90vh;border-radius:8px;}
 
 /* Desktop only */
+/* Mobile mode */
+body.mobile-mode #sidebar{position:fixed;right:0;top:0;bottom:0;z-index:100;width:min(280px,100%);box-shadow:-4px 0 20px rgba(0,0,0,0.5);transition:transform 0.25s;}
+body.mobile-mode #sidebar.hidden{transform:translateX(100%);}
+body.mobile-mode .backbtn{display:flex!important;}
+body.mobile-mode .main{width:100%;}
+body.mobile-mode .msgInput{font-size:16px;}
 </style>
 </head>
 <body>
@@ -545,6 +551,15 @@ body.mobile-mode #mobileNav{display:flex;}
       </div>
     </div>
 
+    <!-- وضع العرض -->
+    <div style="border-top:1px solid var(--border);padding-top:14px;margin-bottom:16px;">
+      <div class="mpick-label" style="margin-bottom:10px;">🖥️ وضع العرض</div>
+      <div style="display:flex;gap:8px;">
+        <button id="btnModeDesktop" onclick="setDisplayMode('desktop')" style="flex:1;padding:10px;border-radius:8px;border:2px solid var(--accent);background:var(--accent);color:#fff;font-family:'Cairo',sans-serif;font-size:13px;font-weight:700;cursor:pointer;">🖥️ كمبيوتر</button>
+        <button id="btnModeMobile" onclick="setDisplayMode('mobile')" style="flex:1;padding:10px;border-radius:8px;border:2px solid var(--border);background:var(--bg3);color:var(--text);font-family:'Cairo',sans-serif;font-size:13px;font-weight:700;cursor:pointer;">📱 موبايل</button>
+      </div>
+    </div>
+
     <!-- تسجيل الخروج -->
     <div style="border-top:1px solid var(--border);padding-top:14px;">
       <button onclick="doLogout()" style="width:100%;background:var(--red);color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:700;font-family:'Cairo',sans-serif;cursor:pointer;margin-bottom:8px;">🚪 تسجيل الخروج</button>
@@ -741,6 +756,7 @@ function enterApp(name,color,pass){
   }
   document.getElementById('loginScreen').style.display='none';
   document.getElementById('appScreen').style.display='flex';
+  applyDisplayMode(localStorage.getItem('displayMode')||'desktop');
   document.getElementById('myNameEl').textContent=myName;
   document.getElementById('myAv').textContent=myName[0].toUpperCase();
   document.getElementById('myAv').style.background=myColor;
@@ -999,7 +1015,7 @@ function openPanel(id,name,color,isGrp,online){
 }
 
 function closePanel(){currentRoom=null;document.getElementById('chatPlaceholder').style.display='flex';document.getElementById('chatArea').style.display='none';document.querySelectorAll('.side-item').forEach(el=>el.classList.remove('active'));}
-window.goBack=function(){closePanel();}
+window.goBack=function(){document.getElementById('sidebar').classList.remove('hidden');closePanel();}
 
 window._msgListener=null;
 function listenMsgs(id){
@@ -1246,6 +1262,9 @@ window.showSettings=function(){
       devSec.style.display='block';
       loadDevices();
     }
+    // تحديث أزرار وضع العرض
+    const mode=localStorage.getItem('displayMode')||'desktop';
+    setDisplayMode(mode);
   }catch(e){console.error('settings error:',e);}
 }
 
@@ -1282,6 +1301,28 @@ window.deleteDevice=function(fp){
   });
 }
 window.closeSettings=function(){document.getElementById('settingsModal').style.display='none';}
+
+window.setDisplayMode=function(mode){
+  localStorage.setItem('displayMode', mode);
+  applyDisplayMode(mode);
+  // تحديث الأزرار
+  document.getElementById('btnModeDesktop').style.background = mode==='desktop'?'var(--accent)':'var(--bg3)';
+  document.getElementById('btnModeDesktop').style.color = mode==='desktop'?'#fff':'var(--text)';
+  document.getElementById('btnModeDesktop').style.borderColor = mode==='desktop'?'var(--accent)':'var(--border)';
+  document.getElementById('btnModeMobile').style.background = mode==='mobile'?'var(--accent)':'var(--bg3)';
+  document.getElementById('btnModeMobile').style.color = mode==='mobile'?'#fff':'var(--text)';
+  document.getElementById('btnModeMobile').style.borderColor = mode==='mobile'?'var(--accent)':'var(--border)';
+  toast(mode==='mobile'?'📱 تم التحويل لوضع الموبايل':'🖥️ تم التحويل لوضع الكمبيوتر');
+}
+
+function applyDisplayMode(mode){
+  if(mode==='mobile'){
+    document.body.classList.add('mobile-mode');
+  } else {
+    document.body.classList.remove('mobile-mode');
+    document.getElementById('sidebar').classList.remove('hidden');
+  }
+}
 window.doLogout=function(){
   if(confirm('تأكيد تسجيل الخروج؟')){
     localStorage.removeItem('chatUser');
